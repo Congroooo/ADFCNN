@@ -34,13 +34,15 @@ class ADFCNN(nn.Module):
             Conv2dWithConstraint(F2, F2, (num_channels, 1), padding=0, groups=F2, bias=False, max_norm=2.),
             nn.BatchNorm2d(F2),
             # nn.ELU(),
-            nn.SiLU(),
+            # nn.SiLU(),
+            nn.ReLU(),
             nn.Dropout(drop_out),
             Conv2dWithConstraint(F2, F2, kernel_size=[1, 1], padding='valid',
                                  max_norm=2.),
             nn.BatchNorm2d(F2),
             # nn.ELU(),
-            nn.SiLU(),
+            # nn.SiLU(),
+            nn.ReLU(),
             pooling_layer((1, 32), stride=32),
             nn.Dropout(drop_out),
         )
@@ -81,8 +83,11 @@ class ADFCNN(nn.Module):
         q = torch.nn.functional.normalize(q, dim=-1)
         k = torch.nn.functional.normalize(k, dim=-1)
         d_k = q.size(-1)
+        #transpose是进行维度的交换，此处采用的是负索引
         attn = (q @ k.transpose(-2, -1)) / math.sqrt(d_k)
-        # -------------------
+        #对最后一个维度进行softmax计算
+        #Softmax函数可以将每一行的得分转换为一个概率分布，其中每个得分都被压缩到0和1之间，并且一行的和等于1
+        #每一行的和都为1，表示每个查询（Query）对于不同键（Key）在加权时的权重比例
         attn = attn.softmax(dim=-1)
 
         x = (attn @ v).reshape(B, N, C)
@@ -92,39 +97,40 @@ class ADFCNN(nn.Module):
         x = self.drop(x_attention)
         return x
 
-# 原始匹配751个时间点的分类器
-class classifier(nn.Module):
-    def __init__(self, num_classes):
-        super(classifier, self).__init__()
-
-        self.dense = nn.Sequential(
-            nn.Conv2d(8, num_classes, (1, 51)),
-            nn.LogSoftmax(dim=1)
-        )
-
-    def forward(self, x):
-        x = self.dense(x)  # [16, 4, 1, 19]，维度序号[0,1,2,3]
-        x = torch.squeeze(x, 2)  # 先移除height维度 [16, 4, 19]
-        # 在时间维度上取平均或最后一个时间点
-        x = x.mean(dim=2)  # [16, 4] - 时间维度平均
-        # 或者: x = x[:, :, -1]  # [16, 4] - 取最后一个时间点
-        return x
-
-#自适应池化的分类器
+# 原始匹配1001个时间点的分类器
 # class classifier(nn.Module):
 #     def __init__(self, num_classes):
 #         super(classifier, self).__init__()
 #
-#         # 使用自适应池化，避免维度问题
 #         self.dense = nn.Sequential(
-#             nn.AdaptiveAvgPool2d((1, 1)),  # 自适应到 [batch, 8, 1, 1]
-#             nn.Flatten(),  # 变成 [batch, 8]
-#             nn.Linear(8, num_classes),  # [batch, 4]
+#             nn.Conv2d(8, num_classes, (1, 51)),
 #             nn.LogSoftmax(dim=1)
 #         )
 #
 #     def forward(self, x):
-#         return self.dense(x)
+#         x = self.dense(x)  # [16, 4, 1, 19]，维度序号[0,1,2,3]
+#         x = torch.squeeze(x, 2)  # 先移除height维度 [16, 4, 19]
+#         # 在时间维度上取平均或最后一个时间点
+#         x = x.mean(dim=2)  # [16, 4] - 时间维度平均
+#         # 或者: x = x[:, :, -1]，：表示取所有的元素，-1表示取最后一个索引位置的元素
+#
+#         return x
+
+#自适应池化的分类器
+class classifier(nn.Module):
+    def __init__(self, num_classes):
+        super(classifier, self).__init__()
+
+        # 使用自适应池化，避免维度问题
+        self.dense = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),  # 自适应到 [batch, 8, 1, 1]
+            nn.Flatten(),  # 变成 [batch, 8]
+            nn.Linear(8, num_classes),  # [batch, 4]
+            nn.LogSoftmax(dim=1)
+        )
+
+    def forward(self, x):
+        return self.dense(x)
 
 class Net(nn.Module):   
     def __init__(self,
